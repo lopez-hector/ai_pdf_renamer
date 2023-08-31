@@ -6,7 +6,7 @@ import json, re
 import shutil
 from pathlib import Path
 from pprint import pprint
-from typing import Union
+from typing import Union, Dict
 import os
 import pypdf
 
@@ -15,7 +15,7 @@ from utils import load_hashes_from_file, calculate_hash, save_hashes_to_file
 OpenAIResponse = str
 
 
-def open_ai_get_filename(text_split) -> OpenAIResponse:
+def open_ai_get_pdf_info(text_split) -> OpenAIResponse:
     import openai
     system_prompt = """
         I am an assistant that processes text from a pdf scientific article extract key information. 
@@ -54,7 +54,7 @@ def read_pdf(filepath: Union[str, Path]):
         yield page.extract_text()
 
 
-def get_filename_for_pdf(filepath: Union[str, Path]):
+def get_pdf_info(filepath: Union[str, Path]) -> Union[Dict, None]:
     """
         1. Grab directory pdfs
         2. read pdf
@@ -62,19 +62,35 @@ def get_filename_for_pdf(filepath: Union[str, Path]):
         4. reaname each pdf with the titel_author.pdf
     :return:
     """
+    info = None
 
     for i, page in enumerate(read_pdf(filepath)):
-        title = open_ai_get_filename(text_split=page)
+        print('*'*5)
+        print('*'*5)
+        print(filepath, page[:100])
+        print('*' * 5)
+        print('*' * 5)
+        if page:
+            info = open_ai_get_pdf_info(text_split=page)
 
-        if 'none' not in title.lower():
-            break
-        elif i > 1:
-            break
-    return title
+            if 'none' not in info.lower():
+                break
+            elif i > 1:
+                break
+        else:
+            print('no content')
+
+    try:
+        return json.loads(info)
+    except json.decoder.JSONDecodeError:
+        return None
+    except TypeError:
+        return None
 
 
-def main(dirs: Path, rename_file: bool = False):
-    hashes_file_path = 'hashes.pkl'
+def main(dirs: Path, rename_file: bool = False, force: bool=False):
+    root_dir = Path(__file__).resolve().parent
+    hashes_file_path = root_dir / 'hashes.pkl'
     processed_hashes = load_hashes_from_file(hashes_file_path)
 
     for file in dirs.iterdir():
@@ -82,14 +98,15 @@ def main(dirs: Path, rename_file: bool = False):
         if file.is_file() and file.name[-3:] == 'pdf':
             # check if its already processed
             pdf_hash = calculate_hash(file)
-            if pdf_hash in processed_hashes:
+            if pdf_hash in processed_hashes and not force:
                 continue
 
-            info = get_filename_for_pdf(file)
-            print('-' * 50)
-            print(info)
+            info: Dict = get_pdf_info(file)
 
-            info = json.loads(info)
+            if info is None:
+                print(f'skipping {file.name}')
+                continue  # skip this file
+
             title = str(info['year']) + '_' + info['title'][:30].replace(" ", "").replace(':', '-') + '_' + info['last_author'].replace(' ', '') + '.pdf'
             print('title')
             print(title)
@@ -109,6 +126,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process pdf files and rename.")
     parser.add_argument("--directory", type=str, help="Directory you want to process.")
     parser.add_argument('--rename', action='store_true', help='Rename file')
+    parser.add_argument('-f', '--force_process', action='store_true', help='force_process_files')
+
     args = parser.parse_args()
     directory_to_rename = Path(args.directory)
-    main(directory_to_rename, rename_file=args.rename)
+    main(directory_to_rename, rename_file=args.rename, force=args.force_process)
