@@ -1,3 +1,4 @@
 *.DS_Store
 *pkl
 .idea
+__pycache__
